@@ -32,6 +32,7 @@ FRAME_MS = 60
 FRAME_SAMPLES = MIC_RATE * FRAME_MS // 1000
 IDLE_END_S = 20  # back to waiting for the wake word after this long without the user speaking
 MIC_RESUME_S = 0.4  # keep the mic muted a little after playback, or the speaker's tail reaches the server
+MIC_STALL_S = 5  # a fresh Bluetooth mic can take a few seconds to deliver its first block
 
 
 def log(message):
@@ -47,11 +48,35 @@ class Mic:
         if mic_file:
             threading.Thread(target=self._read_file, args=(mic_file,), daemon=True).start()
         else:
-            import sounddevice as sd
+            self.device = device
+            self._open()
+            threading.Thread(target=self._watch, daemon=True).start()
 
-            self.stream = sd.RawInputStream(samplerate=MIC_RATE, channels=1, dtype="int16", blocksize=FRAME_SAMPLES, device=device,
-                                            callback=lambda data, _n, _t, _s: self.blocks.put(bytes(data)))
-            self.stream.start()
+    def _open(self):
+        import sounddevice as sd
+
+        def on_block(data, _n, _t, _s):
+            self.last_block = time.monotonic()
+            self.blocks.put(bytes(data))
+
+        self.last_block = time.monotonic()
+        self.stream = sd.RawInputStream(samplerate=MIC_RATE, channels=1, dtype="int16", blocksize=FRAME_SAMPLES, device=self.device,
+                                        callback=on_block)
+        self.stream.start()
+
+    def _watch(self):
+        """A dropped Bluetooth link stops the callbacks without any error, so reopen when they stop."""
+        while True:
+            time.sleep(1)
+            if time.monotonic() - self.last_block < MIC_STALL_S:
+                continue
+            log("麦克风没有数据，重新打开")
+            threading.Thread(target=self.stream.close, daemon=True).start()  # closing a dead stream can hang
+            try:
+                self._open()
+            except Exception as err:  # the speaker may be off; keep trying until it returns
+                self.last_block = time.monotonic()
+                log(f"麦克风打开失败: {err}")
 
     def _read_file(self, path):
         with wave.open(path) as w:

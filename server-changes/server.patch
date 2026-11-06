@@ -13,7 +13,7 @@ index 10c9d49..6dd9538 100644
      if features:
          conn.logger.bind(tag=TAG).debug(f"客户端特性: {features}")
 diff --git a/main/xiaozhi-server/core/handle/receiveAudioHandle.py b/main/xiaozhi-server/core/handle/receiveAudioHandle.py
-index 2e81a78..206ad5b 100644
+index 2e81a78..663b588 100644
 --- a/main/xiaozhi-server/core/handle/receiveAudioHandle.py
 +++ b/main/xiaozhi-server/core/handle/receiveAudioHandle.py
 @@ -14,6 +14,9 @@ from core.handle.sendAudioHandle import send_stt_message, SentenceType
@@ -39,25 +39,17 @@ index 2e81a78..206ad5b 100644
      # 设备长时间空闲检测，用于say goodbye
      await no_voice_close_connect(conn, have_voice)
      # 接收音频
-@@ -110,10 +119,18 @@ async def startToChat(conn: "ConnectionHandler", text):
+@@ -110,6 +119,10 @@ async def startToChat(conn: "ConnectionHandler", text):
  async def no_voice_close_connect(conn: "ConnectionHandler", have_voice):
      if have_voice:
          conn.last_activity_time = time.time() * 1000
 +        conn.proactive_session = False  # 用户回应了，之后按普通对话处理
++        return
++    # 主动开口后没人回应由 close_when_no_reply 安静结束，不说告别语
++    if getattr(conn, "proactive_session", False):
          return
      # 只有在已经初始化过时间戳的情况下才进行超时检查
      if conn.last_activity_time > 0.0:
-         no_voice_time = time.time() * 1000 - conn.last_activity_time
-+        # 主动开口后没人回应：安静结束，不说告别语
-+        if getattr(conn, "proactive_session", False) and not conn.client_is_speaking:
-+            limit = int((conn.config.get("proactive") or {}).get("no_reply_seconds", 30))
-+            if no_voice_time > 1000 * limit:
-+                conn.logger.bind(tag=TAG).info("主动对话无人回应，结束连接")
-+                await conn.close()
-+            return
-         close_connection_no_voice_time = int(
-             conn.config.get("close_connection_no_voice_time", 120)
-         )
 diff --git a/main/xiaozhi-server/core/handle/sendAudioHandle.py b/main/xiaozhi-server/core/handle/sendAudioHandle.py
 index cdd9447..ebded3f 100644
 --- a/main/xiaozhi-server/core/handle/sendAudioHandle.py
@@ -72,7 +64,7 @@ index cdd9447..ebded3f 100644
  
  async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text, sentence_id=None):
 diff --git a/main/xiaozhi-server/core/handle/textHandler/listenMessageHandler.py b/main/xiaozhi-server/core/handle/textHandler/listenMessageHandler.py
-index 545ccec..ef78771 100644
+index 545ccec..8a124c4 100644
 --- a/main/xiaozhi-server/core/handle/textHandler/listenMessageHandler.py
 +++ b/main/xiaozhi-server/core/handle/textHandler/listenMessageHandler.py
 @@ -7,6 +7,7 @@ if TYPE_CHECKING:
@@ -83,7 +75,27 @@ index 545ccec..ef78771 100644
  from core.providers.asr.dto.dto import InterfaceType
  from core.handle.receiveAudioHandle import startToChat
  from core.handle.reportHandle import enqueue_asr_report
-@@ -93,6 +94,13 @@ class ListenTextMessageHandler(TextMessageHandler):
+@@ -19,6 +20,19 @@ from core.providers.tts.dto.dto import ContentType, TTSMessageDTO, SentenceType
+ 
+ TAG = __name__
+ 
++
++async def close_when_no_reply(conn: "ConnectionHandler") -> None:
++    """主动开口后没人回应就安静结束。设备可能不发音频，所以不能靠收音频时检查。"""
++    limit_ms = 1000 * int((conn.config.get("proactive") or {}).get("no_reply_seconds", 30))
++    while conn.proactive_session and not conn.stop_event.is_set():
++        await asyncio.sleep(1)
++        # 发送语音时 last_activity_time 持续更新，所以这里从她说完才开始计时
++        if conn.proactive_session and time.time() * 1000 - conn.last_activity_time > limit_ms:
++            conn.logger.bind(tag=TAG).info("主动对话无人回应，结束连接")
++            await conn.close()
++            return
++
++
+ class ListenTextMessageHandler(TextMessageHandler):
+     """Listen消息处理器"""
+ 
+@@ -93,6 +107,14 @@ class ListenTextMessageHandler(TextMessageHandler):
                      conn.dialogue.put(Message(role="assistant", content=call_text))
                      return
  
@@ -91,6 +103,7 @@ index 545ccec..ef78771 100644
 +                if original_text == PROACTIVE_MARKER:
 +                    conn.just_woken_up = True
 +                    conn.proactive_session = True
++                    asyncio.create_task(close_when_no_reply(conn))
 +                    await startToChat(conn, random_prompt(conn.config))
 +                    return
 +
@@ -147,3 +160,42 @@ index 0229b43..229e717 100644
          mode = getattr(self, "thinking_mode", "")
          if mode in ("keep", "passthrough", "default"):
              # 不干预: 既不发 thinking 参数也不查域名表(适用于强制思考/拒绝该参数的模型, 如 MaaS glm-5.3)
+diff --git a/main/xiaozhi-server/core/providers/tts/huoshan_double_stream.py b/main/xiaozhi-server/core/providers/tts/huoshan_double_stream.py
+index 0e5c7d2..39b8f75 100644
+--- a/main/xiaozhi-server/core/providers/tts/huoshan_double_stream.py
++++ b/main/xiaozhi-server/core/providers/tts/huoshan_double_stream.py
+@@ -147,6 +147,8 @@ class TTSProvider(TTSProviderBase):
+         self._pending_prefix = ""
+         self.appId = config.get("appid")
+         self.access_token = config.get("access_token")
++        # BytePlus 新控制台使用单一 API Key；未配置时沿用 appid + access_token
++        self.api_key = config.get("api_key")
+         self.cluster = config.get("cluster")
+         self.resource_id = config.get("resource_id")
+         self.resource_type = True if self.resource_id == "seed-tts-2.0" else False
+@@ -203,7 +205,7 @@ class TTSProvider(TTSProviderBase):
+         self.enable_ws_reuse = False if str(enable_ws_reuse_value).lower() == 'false' else True
+         self.tts_text = ""
+ 
+-        model_key_msg = check_model_key("TTS", self.access_token)
++        model_key_msg = check_model_key("TTS", self.api_key or self.access_token)
+         if model_key_msg:
+             logger.bind(tag=TAG).error(model_key_msg)
+ 
+@@ -235,11 +237,14 @@ class TTSProvider(TTSProviderBase):
+             await self._cancel_monitor_task()
+ 
+             ws_header = {
+-                "X-Api-App-Key": self.appId,
+-                "X-Api-Access-Key": self.access_token,
+                 "X-Api-Resource-Id": self.resource_id,
+                 "X-Api-Connect-Id": uuid.uuid4(),
+             }
++            if self.api_key:
++                ws_header["X-Api-Key"] = self.api_key
++            else:
++                ws_header["X-Api-App-Key"] = self.appId
++                ws_header["X-Api-Access-Key"] = self.access_token
+             self.ws = await websockets.connect(
+                 self.ws_url, additional_headers=ws_header, max_size=1000000000
+             )
