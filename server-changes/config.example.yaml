@@ -26,7 +26,7 @@ prompt: |
 proactive:
   enabled: true
   min_interval_minutes: 5
-  max_interval_minutes: 90
+  max_interval_minutes: 30
   quiet_start_hour: 23
   quiet_end_hour: 8
   no_reply_seconds: 30
