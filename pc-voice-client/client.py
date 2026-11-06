@@ -24,7 +24,7 @@ HERE = Path(__file__).parent
 KWS_DIR = HERE / "models" / "sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01"
 KEYWORDS = HERE / "keywords.txt"
 OTA_URL = "http://127.0.0.1:8003/xiaozhi/ota/"
-PROACTIVE_URL = "http://127.0.0.1:8003/xiaozhi/proactive"
+PROACTIVE_URL = "http://127.0.0.1:8003/xiaozhi/proactive?client=speaker"
 PROACTIVE_MARKER = "__proactive__"
 HEADERS = {"Device-Id": "02:00:00:00:00:10", "Client-Id": "pc-voice-client", "Protocol-Version": "1", "Authorization": "Bearer pc"}
 MIC_RATE = 16000
@@ -260,7 +260,7 @@ if __name__ == "__main__":
     parser.add_argument("--list", action="store_true", help="list sound devices and exit")
     parser.add_argument("--input", default="ヘッドセット SoundCore MME", help="microphone: words from the name and host API in --list")
     parser.add_argument("--output", default="ヘッドホン SoundCore MME", help="speaker: words from the name and host API in --list")
-    parser.add_argument("--proactive-every", type=float, default=300, help="seconds between asking the server whether to start talking")
+    parser.add_argument("--proactive-every", type=float, default=60, help="seconds between asking the server whether to start talking")
     parser.add_argument("--mic-file", help="test: 16 kHz mono WAV used instead of the microphone")
     parser.add_argument("--out-file", help="test: write the reply to this WAV instead of the speaker")
     arguments = parser.parse_args()

@@ -25,8 +25,8 @@ prompt: |
 # 主动说话：设备空闲时定期询问，这里决定什么时候开口。改完重启服务端即可，不用烧录
 proactive:
   enabled: true
-  min_interval_minutes: 30
-  max_interval_minutes: 120
+  min_interval_minutes: 5
+  max_interval_minutes: 90
   quiet_start_hour: 23
   quiet_end_hour: 8
   no_reply_seconds: 30

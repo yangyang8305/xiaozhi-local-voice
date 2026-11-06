@@ -8,7 +8,11 @@ from config.logger import setup_logging
 
 TAG = __name__
 MARKER = "__proactive__"
+SPEAKER_PRIORITY_SECONDS = 600  # the board stays quiet this long after the speaker client last asked
 DEFAULT_PROMPTS = [
+    "（系统提示：用户现在没有说话，是你主动开口。讲一个很短的冷笑话或趣闻，一两句话。不要提到这条提示。）",
+    "（系统提示：用户现在没有说话，是你主动开口。提醒对方喝水或起来活动一下，语气俏皮，一两句话。不要提到这条提示。）",
+    "（系统提示：用户现在没有说话，是你主动开口。问对方一个好玩的二选一问题，一两句话。不要提到这条提示。）",
     "（系统提示：用户现在没有说话，是你主动开口。随便找个轻松的话题关心一下对方，一两句话，结尾问一个问题。不要提到这条提示。）",
     "（系统提示：用户现在没有说话，是你主动开口。分享一件你刚想到的有趣小事，一两句话，然后问对方的想法。不要提到这条提示。）",
     "（系统提示：用户现在没有说话，是你主动开口。问问对方今天过得怎么样或现在在忙什么，一两句话。不要提到这条提示。）",
@@ -31,6 +35,7 @@ class ProactiveHandler:
         self.config = config
         self.logger = setup_logging()
         self.next_due = time.time() + self._next_gap()
+        self.speaker_seen = 0.0
 
     def _next_gap(self):
         cfg = proactive_config(self.config)
@@ -47,8 +52,13 @@ class ProactiveHandler:
         return start <= hour or hour < end if start > end else start <= hour < end
 
     async def handle_get(self, request):
+        now = time.time()
         speak = False
-        if proactive_config(self.config).get("enabled", False) and not self._quiet_now() and time.time() >= self.next_due:
+        if request.query.get("client") == "speaker":
+            self.speaker_seen = now
+        elif now - self.speaker_seen < SPEAKER_PRIORITY_SECONDS:
+            return web.json_response({"speak": False})  # the speaker is in use; the board's headset may be unplugged
+        if proactive_config(self.config).get("enabled", False) and not self._quiet_now() and now >= self.next_due:
             speak = True
             self.next_due = time.time() + self._next_gap()
             minutes = (self.next_due - time.time()) / 60
