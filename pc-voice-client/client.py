@@ -24,6 +24,8 @@ HERE = Path(__file__).parent
 KWS_DIR = HERE / "models" / "sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01"
 KEYWORDS = HERE / "keywords.txt"
 OTA_URL = "http://127.0.0.1:8003/xiaozhi/ota/"
+PROACTIVE_URL = "http://127.0.0.1:8003/xiaozhi/proactive"
+PROACTIVE_MARKER = "__proactive__"
 HEADERS = {"Device-Id": "02:00:00:00:00:10", "Client-Id": "pc-voice-client", "Protocol-Version": "1", "Authorization": "Bearer pc"}
 MIC_RATE = 16000
 FRAME_MS = 60
@@ -155,12 +157,23 @@ async def next_block(mic):
             await asyncio.sleep(0.01)
 
 
-async def converse(mic, player):
+def proactive_due():
+    """Asks the server whether to start talking; a stopped server just means no."""
+    try:
+        with urllib.request.urlopen(PROACTIVE_URL, timeout=3) as response:
+            return json.load(response).get("speak", False)
+    except (OSError, ValueError):
+        return False
+
+
+async def converse(mic, player, proactive=False):
     async with websockets.connect(websocket_url(), additional_headers=HEADERS, max_size=None) as ws:
         await ws.send(json.dumps({"type": "hello", "version": 1, "transport": "websocket", "features": {"mcp": False},
                                   "audio_params": {"format": "opus", "sample_rate": MIC_RATE, "channels": 1, "frame_duration": FRAME_MS}}))
         hello = json.loads(await asyncio.wait_for(ws.recv(), 10))
         rate = hello["audio_params"]["sample_rate"]
+        if proactive:
+            await ws.send(json.dumps({"type": "listen", "session_id": hello.get("session_id"), "state": "detect", "text": PROACTIVE_MARKER}))
         await ws.send(json.dumps({"type": "listen", "session_id": hello.get("session_id"), "state": "start", "mode": "auto"}))
         encoder = opuslib_next.Encoder(MIC_RATE, 1, opuslib_next.APPLICATION_VOIP)
         decoder = opuslib_next.Decoder(rate, 1)
@@ -173,7 +186,8 @@ async def converse(mic, player):
                     continue
                 data = json.loads(message)
                 if data.get("type") == "stt":
-                    log(f"你: {data.get('text')}")
+                    if not str(data.get("text", "")).startswith("（系统提示"):
+                        log(f"你: {data.get('text')}")
                     state["last_turn"] = time.monotonic()
                 elif data.get("type") == "tts":
                     if data.get("state") == "start":
@@ -211,22 +225,33 @@ async def main(args):
     wake = WakeWord()
     mic = Mic(args.input, args.mic_file)
     player = Player(args.output, args.out_file)
-    log("等待唤醒词：你好小智 / 小智小智")
+    log("等待唤醒词：你好翠花")
+    loop = asyncio.get_running_loop()
+    check = None
+    next_check = time.monotonic() + args.proactive_every
     while True:
         block = await next_block(mic)
         if block is None:
             break
         word = wake.hit(block)
-        if not word:
+        proactive = False
+        if check is None and time.monotonic() >= next_check:
+            check = loop.run_in_executor(None, proactive_due)
+        if check is not None and check.done():
+            proactive = check.result()
+            check = None
+            next_check = time.monotonic() + args.proactive_every
+        if not word and not proactive:
             continue
-        log(f"已唤醒: {word}")
-        player.beep()
+        log(f"已唤醒: {word}" if word else "她主动开口")
+        if word:
+            player.beep()
         try:
-            await converse(mic, player)
+            await converse(mic, player, proactive=not word)
         except (OSError, TimeoutError, asyncio.TimeoutError, websockets.exceptions.WebSocketException) as err:
             log(f"连接中断: {type(err).__name__}: {err}")
         wake.reset()
-        log("等待唤醒词：你好小智 / 小智小智")
+        log("等待唤醒词：你好翠花")
     player.save()
 
 
@@ -235,6 +260,7 @@ if __name__ == "__main__":
     parser.add_argument("--list", action="store_true", help="list sound devices and exit")
     parser.add_argument("--input", default="ヘッドセット SoundCore MME", help="microphone: words from the name and host API in --list")
     parser.add_argument("--output", default="ヘッドホン SoundCore MME", help="speaker: words from the name and host API in --list")
+    parser.add_argument("--proactive-every", type=float, default=300, help="seconds between asking the server whether to start talking")
     parser.add_argument("--mic-file", help="test: 16 kHz mono WAV used instead of the microphone")
     parser.add_argument("--out-file", help="test: write the reply to this WAV instead of the speaker")
     arguments = parser.parse_args()

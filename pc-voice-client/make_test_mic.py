@@ -23,7 +23,7 @@ def silence(seconds):
 
 
 parts = [silence(2), speak("今天的会议真的好长。"), silence(3)]  # must not wake: not the keyword
-parts += [speak("你好小智"), silence(2), speak("为什么天空是蓝色的？"), silence(16)]
+parts += [speak("你好翠花"), silence(2), speak("为什么天空是蓝色的？"), silence(16)]
 parts += [speak("你最喜欢吃什么？"), silence(12)]
 with wave.open(sys.argv[1], "wb") as w:
     w.setnchannels(1)

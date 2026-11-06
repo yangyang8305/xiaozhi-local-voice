@@ -32,10 +32,10 @@ index 8c318f1..c717f8d 100644
      list(APPEND MAIN_PRIV_REQUIRES_EXTRA espressif__ip101)
  endif()
 diff --git a/main/Kconfig.projbuild b/main/Kconfig.projbuild
-index 3917618..702806d 100644
+index 3917618..e36ea72 100644
 --- a/main/Kconfig.projbuild
 +++ b/main/Kconfig.projbuild
-@@ -6,6 +6,13 @@ config OTA_URL
+@@ -6,6 +6,23 @@ config OTA_URL
      help
          The application will access this URL to check for new firmwares and server address.
  
@@ -46,10 +46,20 @@ index 3917618..702806d 100644
 +        Allows interrupting by voice without acoustic echo cancellation. Only suitable for
 +        headsets, where the speaker does not reach the microphone.
 +
++config PROACTIVE_CHECK_SECONDS
++    int "Ask the server whether to start talking every N seconds while idle (0 = never)"
++    default 0
++    range 0 86400
++
++config PROACTIVE_URL
++    string "Server URL answering whether to start talking"
++    default ""
++    depends on PROACTIVE_CHECK_SECONDS != 0
++
  choice
      prompt "Flash Assets"
      default FLASH_DEFAULT_ASSETS if !USE_EMOTE_MESSAGE_STYLE
-@@ -175,6 +182,9 @@ choice BOARD_TYPE
+@@ -175,6 +192,9 @@ choice BOARD_TYPE
      config BOARD_TYPE_BREAD_COMPACT_WIFI
          bool "Bread Compact Wi-Fi (面包板)"
          depends on IDF_TARGET_ESP32S3
@@ -60,10 +70,91 @@ index 3917618..702806d 100644
          bool "Bread Compact Wi-Fi + LCD (面包板)"
          depends on IDF_TARGET_ESP32S3
 diff --git a/main/application.cc b/main/application.cc
-index e1f0719..b4f6f5e 100644
+index e1f0719..64a72a2 100644
 --- a/main/application.cc
 +++ b/main/application.cc
-@@ -1279,7 +1279,11 @@ void Application::SetListeningMode(ListeningMode mode) {
+@@ -17,11 +17,53 @@
+ #include <arpa/inet.h>
+ #include <cJSON.h>
+ #include <algorithm>
++#include <atomic>
+ #include <cstring>
+ #include <limits>
+ 
+ #define TAG "Application"
+ 
++namespace {
++
++// Sent in place of a wake word when the assistant starts talking on its own.
++constexpr const char* kProactiveWakeWord = "__proactive__";
++
++#if CONFIG_PROACTIVE_CHECK_SECONDS > 0
++std::atomic<bool> proactive_check_running{false};
++
++// Runs off the main task because HTTP can block. A failure stays silent: the
++// server being off must not make an idle device play an error sound.
++void ProactiveCheckTask(void*) {
++    bool speak = false;
++    {
++        auto http = Board::GetInstance().GetNetwork()->CreateHttp(0);
++        if (http->Open("GET", CONFIG_PROACTIVE_URL)) {
++            auto status = http->GetStatusCode();
++            speak = status && *status == 200 && http->ReadAll().find("true") != std::string::npos;
++            http->Close();
++        }
++    }
++    auto& app = Application::GetInstance();
++    if (speak && app.GetDeviceState() == kDeviceStateIdle) {
++        ESP_LOGI(TAG, "Starting a proactive conversation");
++        app.WakeWordInvoke(kProactiveWakeWord);
++    }
++    proactive_check_running = false;
++    vTaskDelete(nullptr);
++}
++
++void StartProactiveCheck() {
++    if (proactive_check_running.exchange(true)) {
++        return;
++    }
++    if (xTaskCreate(ProactiveCheckTask, "proactive", 6144, nullptr, 2, nullptr) != pdPASS) {
++        proactive_check_running = false;
++    }
++}
++#endif
++
++}  // namespace
++
+ Application::Application() : notify_player_(audio_service_) {
+     event_group_ = xEventGroupCreate();
+ 
+@@ -292,6 +334,11 @@ void Application::Run() {
+                 // SystemInfo::PrintTaskList();
+                 // SystemInfo::PrintTaskCpuUsage(pdMS_TO_TICKS(1000));
+             }
++#if CONFIG_PROACTIVE_CHECK_SECONDS > 0
++            if (clock_ticks_ % CONFIG_PROACTIVE_CHECK_SECONDS == 0 && GetDeviceState() == kDeviceStateIdle) {
++                StartProactiveCheck();
++            }
++#endif
+         }
+         if (bits & MAIN_EVENT_STARTUP_HINT_TIMEOUT) {
+             HideStartupWakeWordHint();
+@@ -1002,9 +1049,12 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
+ 
+     ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
+ #if CONFIG_SEND_WAKE_WORD_DATA
+-    // Encode and send the wake word data to the server
++    // Encode and send the wake word data to the server. A proactive start has
++    // no wake word: its cache only holds unrelated room audio, so drop it.
+     while (auto packet = audio_service_.PopWakeWordPacket()) {
+-        protocol_->SendAudio(std::move(packet));
++        if (wake_word != kProactiveWakeWord) {
++            protocol_->SendAudio(std::move(packet));
++        }
+     }
+     // Set the chat state to wake word detected
+     protocol_->SendWakeWordDetected(wake_word);
+@@ -1279,7 +1329,11 @@ void Application::SetListeningMode(ListeningMode mode) {
  }
  
  ListeningMode Application::GetDefaultListeningMode() const {
@@ -92,3 +183,19 @@ index c9c64ec..a7a80dc 100644
    ## Required IDF version
    idf:
      version: '>=6.0.1'
+diff --git a/scripts/build.py b/scripts/build.py
+index f3452ef..5b5d64e 100755
+--- a/scripts/build.py
++++ b/scripts/build.py
+@@ -353,6 +353,11 @@ def _wake_word_sdkconfig_options(
+         options.append("CONFIG_WAKE_WORD_DISABLED=y")
+         return normalized, options, ["CONFIG_WAKE_WORD_DISABLED"]
+ 
++    if normalized == "custom":
++        # Phrase and threshold come from the board's sdkconfig_append.
++        options += ["CONFIG_USE_CUSTOM_WAKE_WORD=y", "CONFIG_SR_MN_CN_NONE=n", "CONFIG_SR_MN_CN_MULTINET7_QUANT=y"]
++        return normalized, options, ["CONFIG_USE_CUSTOM_WAKE_WORD"]
++
+     if target not in _ESP_WAKE_WORD_TARGETS | _AFE_WAKE_WORD_TARGETS:
+         raise ValueError(f"Wake-word selection is not supported for target {target}")
+     if not _WAKE_WORD_MODEL_PATTERN.fullmatch(normalized):

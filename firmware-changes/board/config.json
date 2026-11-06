@@ -20,6 +20,11 @@
                 "CONFIG_LANGUAGE_ZH_CN=y",
                 "CONFIG_OTA_URL=\"http://192.168.151.230:8003/xiaozhi/ota/\"",
                 "CONFIG_LISTEN_WHILE_SPEAKING=y",
+                "CONFIG_CUSTOM_WAKE_WORD=\"ni hao cui hua\"",
+                "CONFIG_CUSTOM_WAKE_WORD_DISPLAY=\"你好翠花\"",
+                "CONFIG_CUSTOM_WAKE_WORD_THRESHOLD=20",
+                "CONFIG_PROACTIVE_CHECK_SECONDS=300",
+                "CONFIG_PROACTIVE_URL=\"http://192.168.151.230:8003/xiaozhi/proactive\"",
                 "CONFIG_UAC_NUM_ISOC_URBS=6",
                 "CONFIG_UAC_NUM_PACKETS_PER_URB=8"
             ]

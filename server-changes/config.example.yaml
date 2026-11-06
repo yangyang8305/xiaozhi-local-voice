@@ -22,6 +22,15 @@ prompt: |
   - 专业问题先把正确答案讲清楚，再加一点可爱的语气。
   - 你不能上网，也查不到天气、新闻这类即时资讯。被问到时用一句话说查不到，不要猜，也不要答应对方「我去查」。
 
+# 主动说话：设备空闲时定期询问，这里决定什么时候开口。改完重启服务端即可，不用烧录
+proactive:
+  enabled: true
+  min_interval_minutes: 30
+  max_interval_minutes: 120
+  quiet_start_hour: 23
+  quiet_end_hour: 8
+  no_reply_seconds: 30
+
 selected_module:
   VAD: SileroVAD
   ASR: FunASR

@@ -15,9 +15,11 @@
 
 | 快捷方式 | 用途 | 怎么说话 |
 |---|---|---|
-| **小智-耳机模式** | USB-C 耳机插在板子的 OTG 口 | 说 **Hi ESP**，**她说话时可以直接开口打断** |
-| **小智-音箱模式** | 蓝牙音箱 SoundCore 2 | 说 **你好小智** 或 **小智小智**，要等她说完再说 |
+| **小智-耳机模式** | USB-C 耳机插在板子的 OTG 口 | 说 **你好翠花**，**她说话时可以直接开口打断** |
+| **小智-音箱模式** | 蓝牙音箱 SoundCore 2 | 说 **你好翠花**，要等她说完再说 |
 | **小智-全部停止** | 关闭全部服务，释放显存 | 不用时点一下 |
+
+**她会主动找你说话**：白天每隔 30–120 分钟随机开口一次，说完打开麦克风听你回答；30 秒没人回应就安静结束。23 点到 8 点不开口。改频率或关闭，见下面的“主动说话设置”。
 
 - 启动约需 1 分钟。服务窗口要一直开着。
 - 第一句可能要等 5–15 秒（模型冷启动），之后通常 2–4 秒开口。
@@ -69,6 +71,23 @@
 **耳机模式被杂音打断**
 灵敏度由服务端 `core\handle\receiveAudioHandle.py` 的 `BARGE_IN_FRAMES` 决定，默认 4 帧（约 240 毫秒），调大就更不容易被打断。
 
+**主动说话设置**
+改 `.config.yaml` 的 `proactive` 段，然后重启（不用烧录）：
+
+| 配置项 | 含义 |
+|---|---|
+| `enabled` | `false` 就是关闭 |
+| `min_interval_minutes`、`max_interval_minutes` | 随机间隔范围（分钟） |
+| `quiet_start_hour`、`quiet_end_hour` | 不开口的时段 |
+| `no_reply_seconds` | 开口后多久没人回应就结束 |
+| `prompts` | 可选，主动开口时给大模型的提示，一个列表 |
+
+板子每 5 分钟问一次服务端，所以实际开口时间会有最多 5 分钟误差。电脑关着时，板子不会报错。
+
+**“你好翠花”不灵敏或总误唤醒**
+板子：`firmware-changes\board\config.json` 里的 `CONFIG_CUSTOM_WAKE_WORD_THRESHOLD`（默认 20，越小越灵敏），改完要重新编译烧录。
+音箱：`client.py` 里的 `keywords_threshold`（默认 0.25，越小越灵敏）和 `keywords_score`，重启客户端生效。
+
 **换人设**
 改 `.config.yaml` 里的 `prompt`，然后重启（全部停止，再启动）。
 
@@ -76,13 +95,13 @@
 替换 `qwen-tts-service\voice\reference-serena.wav`（干净人声，几秒到几十秒，请用你有权使用的声音），然后重启。
 
 **退回官方小智云端**
-用 esptool 把备份写回应用分区：
+用 esptool 把备份写回应用分区和资源分区（唤醒词模型在资源分区里，要一起写）：
 
 ```
-%USERPROFILE%\.platformio\packages\tool-esptool\esptool.exe --chip esp32s3 --port COM3 --baud 921600 write-flash 0x20000 C:\AI\ESP32\xiaozhi-backup\xiaozhi-cloud-2.5.3-usbfix.bin
+%USERPROFILE%\.platformio\packages\tool-esptool\esptool.exe --chip esp32s3 --port COM3 --baud 921600 write-flash 0x20000 C:\AI\ESP32\xiaozhi-backup\xiaozhi-cloud-2.5.3-usbfix.bin 0x800000 C:\AI\ESP32\xiaozhi-backup\assets-hiesp.bin
 ```
 
-本地固件是同目录的 `xiaozhi-local-2.5.3.bin`，刷回去即可切回本地。
+切回本地：同样的命令，换成同目录的 `xiaozhi-local-2.5.3.bin` 和 `assets-cuihua.bin`。
 
 ## 已知限制
 
@@ -102,7 +121,7 @@
 git apply server-changes\server.patch
 ```
 
-- 把 `qwen_local.py` 放进 `main/xiaozhi-server/core/providers/tts/`。
+- 把 `qwen_local.py` 放进 `main/xiaozhi-server/core/providers/tts/`，把 `proactive_handler.py` 放进 `main/xiaozhi-server/core/api/`。
 - 把 `config.example.yaml` 复制为 `main/xiaozhi-server/data/.config.yaml`，改 IP。
 - 把 `start-server.ps1` 放在仓库根目录。
 - 建 conda 环境 `xiaozhi-server`（Python 3.10，`libopus`、`ffmpeg`），安装 `requirements.txt` 和 `sounddevice`。
@@ -130,13 +149,13 @@ git apply firmware-changes\firmware.patch
 
 ```
 $env:CCACHE_DISABLE='1'; & C:\AI\esp-idf-v6.1\export.ps1
-python scripts/build.py freenove-s3-usb-uac --name freenove-s3-usb-uac-local --language zh-CN --wake-word hiesp
+python scripts/build.py freenove-s3-usb-uac --name freenove-s3-usb-uac-local --language zh-CN --wake-word custom
 ```
 
-只写应用分区，不会丢 Wi-Fi 设置：
+写应用和资源分区，不会丢 Wi-Fi 设置：
 
 ```
-esptool --chip esp32s3 --port COM3 --baud 921600 write-flash 0x20000 build\xiaozhi.bin
+esptool --chip esp32s3 --port COM3 --baud 921600 write-flash 0x20000 build\xiaozhi.bin 0x800000 build\generated_assets.bin
 ```
 
 ## 致谢
