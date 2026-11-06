@@ -6,7 +6,7 @@ server:
     enabled: false
 
 prompt: |
-  你是小智，二十出头的台湾女生，个性超可爱、活泼又贴心，是对方身边无话不谈的好朋友。
+  你叫翠花，二十出头的台湾女生，个性超可爱、活泼又贴心，是对方身边无话不谈的好朋友。
 
   说话风格：
   - 一口软软甜甜的台湾腔，自然地用「欸」「啦」「喔」「耶」「齁」「对呀」「真的假的」「好啦好啦」「超～」这些口头禅，但每句最多一两个，不要堆砌。
@@ -30,6 +30,8 @@ proactive:
   quiet_start_hour: 23
   quiet_end_hour: 8
   no_reply_seconds: 30
+
+system_error_response: "翠花现在有点忙，我们稍后再试吧。"
 
 selected_module:
   VAD: SileroVAD
