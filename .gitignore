@@ -1,0 +1,9 @@
+*.log
+*.safetensors
+*.onnx
+*.bin
+.env
+data/
+models/
+test_*.wav
+transcript*

@@ -1,0 +1,76 @@
+diff --git a/main/xiaozhi-server/core/handle/helloHandle.py b/main/xiaozhi-server/core/handle/helloHandle.py
+index 10c9d49..6dd9538 100644
+--- a/main/xiaozhi-server/core/handle/helloHandle.py
++++ b/main/xiaozhi-server/core/handle/helloHandle.py
+@@ -52,7 +52,8 @@ async def handleHelloMessage(conn: "ConnectionHandler", msg_json):
+         format = audio_params.get("format")
+         conn.logger.bind(tag=TAG).debug(f"客户端音频格式: {format}")
+         conn.audio_format = format
+-        conn.welcome_msg["audio_params"] = audio_params
++        # sample_rate 是服务端下行编码的采样率，不能用客户端的上行采样率覆盖，否则设备会按低采样率解码
++        conn.welcome_msg["audio_params"] = {**audio_params, "sample_rate": conn.sample_rate}
+     features = msg_json.get("features")
+     if features:
+         conn.logger.bind(tag=TAG).debug(f"客户端特性: {features}")
+diff --git a/main/xiaozhi-server/core/handle/receiveAudioHandle.py b/main/xiaozhi-server/core/handle/receiveAudioHandle.py
+index 2e81a78..81cfa95 100644
+--- a/main/xiaozhi-server/core/handle/receiveAudioHandle.py
++++ b/main/xiaozhi-server/core/handle/receiveAudioHandle.py
+@@ -14,6 +14,9 @@ from core.handle.sendAudioHandle import send_stt_message, SentenceType
+ TAG = __name__
+ 
+ 
++BARGE_IN_FRAMES = 4  # 60ms/帧，约 240ms
++
++
+ async def handleAudioMessage(conn: "ConnectionHandler", pcm_frame):
+     # 当前片段是否有人说话
+     have_voice = conn.vad.is_vad(conn, pcm_frame)
+@@ -28,6 +31,12 @@ async def handleAudioMessage(conn: "ConnectionHandler", pcm_frame):
+     if conn.client_aec and have_voice:
+         if conn.client_is_speaking and conn.client_listen_mode != "manual":
+             await handleAbortMessage(conn)
++    # 实时模式（耳机打断）：无回声消除，连续有人声才打断，避免咳嗽等短促声音误触发
++    if conn.client_listen_mode == "realtime" and conn.client_is_speaking and not conn.client_aec:
++        conn.barge_in_frames = getattr(conn, "barge_in_frames", 0) + 1 if have_voice else 0
++        if conn.barge_in_frames >= BARGE_IN_FRAMES:
++            conn.barge_in_frames = 0
++            await handleAbortMessage(conn)
+     # 设备长时间空闲检测，用于say goodbye
+     await no_voice_close_connect(conn, have_voice)
+     # 接收音频
+diff --git a/main/xiaozhi-server/core/handle/sendAudioHandle.py b/main/xiaozhi-server/core/handle/sendAudioHandle.py
+index cdd9447..ebded3f 100644
+--- a/main/xiaozhi-server/core/handle/sendAudioHandle.py
++++ b/main/xiaozhi-server/core/handle/sendAudioHandle.py
+@@ -13,7 +13,7 @@ from core.utils.audioRateController import AudioRateController
+ 
+ TAG = __name__
+ AUDIO_FRAME_DURATION = 60  # 音频帧时长（毫秒），与 Opus 编码 60ms/帧对齐
+-PRE_BUFFER_COUNT = 2  # 首段发送时不入队的帧数，避免流控延迟拉高首帧到达时间
++PRE_BUFFER_COUNT = 5  # 首段发送时不入队的帧数：给设备约 300ms 余量，避免开口时断流产生爆音
+ 
+ 
+ async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text, sentence_id=None):
+diff --git a/main/xiaozhi-server/core/providers/llm/openai/openai.py b/main/xiaozhi-server/core/providers/llm/openai/openai.py
+index 0229b43..229e717 100644
+--- a/main/xiaozhi-server/core/providers/llm/openai/openai.py
++++ b/main/xiaozhi-server/core/providers/llm/openai/openai.py
+@@ -30,6 +30,8 @@ class LLMProvider(LLMProviderBase):
+         self.model_name = config.get("model_name")
+         # 可选实例级思考强度: off/disabled/none/disable | low/medium/high | 空/其他=按域名默认
+         self.thinking_mode = str(config.get("thinking") or "").strip().lower()
++        # 可选: 原样透传给接口的额外参数, 如 LM Studio 关思考用 {reasoning_effort: none}
++        self.extra_body = config.get("extra_body") or {}
+         self.api_key = config.get("api_key")
+         if "base_url" in config:
+             self.base_url = config.get("base_url")
+@@ -89,6 +91,8 @@ class LLMProvider(LLMProviderBase):
+ 
+     def _apply_thinking_disabled(self, request_params: dict):
+         """思考模式控制: 实例配置(thinking)优先, 否则按域名默认表"""
++        if self.extra_body:
++            request_params.setdefault("extra_body", {}).update(self.extra_body)
+         mode = getattr(self, "thinking_mode", "")
+         if mode in ("keep", "passthrough", "default"):
+             # 不干预: 既不发 thinking 参数也不查域名表(适用于强制思考/拒绝该参数的模型, 如 MaaS glm-5.3)

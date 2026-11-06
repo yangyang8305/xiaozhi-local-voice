@@ -1,0 +1,94 @@
+diff --git a/main/CMakeLists.txt b/main/CMakeLists.txt
+index 8c318f1..c717f8d 100644
+--- a/main/CMakeLists.txt
++++ b/main/CMakeLists.txt
+@@ -11,6 +11,7 @@ set(SOURCES "audio/audio_codec.cc"
+             "audio/codecs/es8388_audio_codec.cc"
+             "audio/codecs/es8389_audio_codec.cc"
+             "audio/codecs/dummy_audio_codec.cc"
++            "audio/codecs/usb_uac_audio_codec.cc"
+             "led/single_led.cc"
+             "led/circular_strip.cc"
+             "led/gpio_led.cc"
+@@ -95,6 +96,10 @@ if(CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI)
+     set(BOARD_DIR "bread-compact-wifi")
+     set(BUILTIN_TEXT_FONT font_noto_sans_basic_14_1)
+     set(BUILTIN_ICON_FONT font_material_symbols_14_1)
++elseif(CONFIG_BOARD_TYPE_FREENOVE_S3_USB_UAC)
++    set(BOARD_DIR "freenove-s3-usb-uac")
++    set(BUILTIN_TEXT_FONT font_noto_sans_basic_14_1)
++    set(BUILTIN_ICON_FONT font_material_symbols_14_1)
+ elseif(CONFIG_BOARD_TYPE_BREAD_COMPACT_ML307)
+     set(BOARD_DIR "bread-compact-ml307")
+     set(BUILTIN_TEXT_FONT font_noto_sans_basic_14_1)
+@@ -1167,6 +1172,9 @@ if(CONFIG_IDF_TARGET_ESP32S3)
+ endif()
+ 
+ set(MAIN_PRIV_REQUIRES_EXTRA "")
++if(CONFIG_BOARD_TYPE_FREENOVE_S3_USB_UAC)
++    list(APPEND MAIN_PRIV_REQUIRES_EXTRA espressif__usb_host_uac)
++endif()
+ if(CONFIG_XIAOZHI_NETWORK_ETHERNET AND CONFIG_XIAOZHI_ETH_PHY_IP101)
+     list(APPEND MAIN_PRIV_REQUIRES_EXTRA espressif__ip101)
+ endif()
+diff --git a/main/Kconfig.projbuild b/main/Kconfig.projbuild
+index 3917618..702806d 100644
+--- a/main/Kconfig.projbuild
++++ b/main/Kconfig.projbuild
+@@ -6,6 +6,13 @@ config OTA_URL
+     help
+         The application will access this URL to check for new firmwares and server address.
+ 
++config LISTEN_WHILE_SPEAKING
++    bool "Keep the microphone streaming while the assistant speaks"
++    default n
++    help
++        Allows interrupting by voice without acoustic echo cancellation. Only suitable for
++        headsets, where the speaker does not reach the microphone.
++
+ choice
+     prompt "Flash Assets"
+     default FLASH_DEFAULT_ASSETS if !USE_EMOTE_MESSAGE_STYLE
+@@ -175,6 +182,9 @@ choice BOARD_TYPE
+     config BOARD_TYPE_BREAD_COMPACT_WIFI
+         bool "Bread Compact Wi-Fi (面包板)"
+         depends on IDF_TARGET_ESP32S3
++    config BOARD_TYPE_FREENOVE_S3_USB_UAC
++        bool "Freenove ESP32-S3 WROOM + USB-C UAC Headset"
++        depends on IDF_TARGET_ESP32S3
+     config BOARD_TYPE_BREAD_COMPACT_WIFI_LCD
+         bool "Bread Compact Wi-Fi + LCD (面包板)"
+         depends on IDF_TARGET_ESP32S3
+diff --git a/main/application.cc b/main/application.cc
+index e1f0719..b4f6f5e 100644
+--- a/main/application.cc
++++ b/main/application.cc
+@@ -1279,7 +1279,11 @@ void Application::SetListeningMode(ListeningMode mode) {
+ }
+ 
+ ListeningMode Application::GetDefaultListeningMode() const {
++#if CONFIG_LISTEN_WHILE_SPEAKING
++    return kListeningModeRealtime;
++#else
+     return aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime;
++#endif
+ }
+ 
+ void Application::Reboot() {
+diff --git a/main/idf_component.yml b/main/idf_component.yml
+index c9c64ec..a7a80dc 100644
+--- a/main/idf_component.yml
++++ b/main/idf_component.yml
+@@ -159,6 +159,12 @@ dependencies:
+     public: true
+     version: '*'
+ 
++  # USB UAC 1.0 host driver for the Freenove S3 + USB-C headset board.
++  espressif/usb_host_uac:
++    version: ^1.5.0
++    rules:
++    - if: target in [esp32s2, esp32s3, esp32p4, esp32h4, esp32s31]
++
+   ## Required IDF version
+   idf:
+     version: '>=6.0.1'

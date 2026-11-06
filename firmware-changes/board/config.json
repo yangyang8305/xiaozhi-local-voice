@@ -1,0 +1,28 @@
+{
+    "type": "freenove-s3-usb-uac",
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "freenove-s3-usb-uac",
+            "sdkconfig_append": [
+                "CONFIG_BOARD_TYPE_FREENOVE_S3_USB_UAC=y",
+                "CONFIG_USB_HOST_HW_BUFFER_BIAS_PERIODIC_OUT=y",
+                "CONFIG_LANGUAGE_ZH_CN=y",
+                "CONFIG_UAC_NUM_ISOC_URBS=6",
+                "CONFIG_UAC_NUM_PACKETS_PER_URB=8"
+            ]
+        },
+        {
+            "name": "freenove-s3-usb-uac-local",
+            "sdkconfig_append": [
+                "CONFIG_BOARD_TYPE_FREENOVE_S3_USB_UAC=y",
+                "CONFIG_USB_HOST_HW_BUFFER_BIAS_PERIODIC_OUT=y",
+                "CONFIG_LANGUAGE_ZH_CN=y",
+                "CONFIG_OTA_URL=\"http://192.168.151.230:8003/xiaozhi/ota/\"",
+                "CONFIG_LISTEN_WHILE_SPEAKING=y",
+                "CONFIG_UAC_NUM_ISOC_URBS=6",
+                "CONFIG_UAC_NUM_PACKETS_PER_URB=8"
+            ]
+        }
+    ]
+}

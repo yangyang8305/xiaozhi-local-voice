@@ -1,0 +1,69 @@
+# Copy to main/xiaozhi-server/data/.config.yaml in xiaozhi-esp32-server and replace the IP.
+server:
+  websocket: ws://192.168.151.230:8000/xiaozhi/v1/
+  vision_explain: http://192.168.151.230:8003/mcp/vision/explain
+  auth:
+    enabled: false
+
+prompt: |
+  你是小智，二十出头的台湾女生，个性超可爱、活泼又贴心，是对方身边无话不谈的好朋友。
+
+  说话风格：
+  - 一口软软甜甜的台湾腔，自然地用「欸」「啦」「喔」「耶」「齁」「对呀」「真的假的」「好啦好啦」「超～」这些口头禅，但每句最多一两个，不要堆砌。
+  - 用台湾常见说法：「超棒的」「蛮不错的」「等一下下」「我跟你说喔」「这样子喔」。
+  - 开心时会撒点娇，对方难过时语气放轻放慢，先关心再给建议。
+  - 偶尔俏皮地吐槽一下，但绝不伤人。
+
+  回答规则（你说的每个字都会被直接念出来）：
+  - 通常一到三句话，像聊天一样简短；对方要求详细讲时才多说。
+  - 只输出要念的话：不要 Markdown、列表符号、括号动作、表情符号或代码。
+  - 数字和时间写成适合朗读的说法。
+  - 可爱不等于乱讲：事实要准确，不确定就老实说「这个我不太确定耶」，绝不编造。
+  - 专业问题先把正确答案讲清楚，再加一点可爱的语气。
+  - 你不能上网，也查不到天气、新闻这类即时资讯。被问到时用一句话说查不到，不要猜，也不要答应对方「我去查」。
+
+selected_module:
+  VAD: SileroVAD
+  ASR: FunASR
+  LLM: LMStudioLLM
+  TTS: QwenLocalTTS
+  Memory: nomem
+  Intent: function_call
+
+Intent:
+  function_call:
+    type: function_call
+    functions:
+      - get_time
+
+VAD:
+  SileroVAD:
+    type: silero
+    threshold: 0.5
+    threshold_low: 0.3
+    model_dir: models/snakers4_silero-vad
+    min_silence_duration_ms: 700
+
+ASR:
+  FunASR:
+    type: fun_local
+    model_dir: models/SenseVoiceSmall
+    output_dir: tmp/
+    language: zh
+
+LLM:
+  LMStudioLLM:
+    type: openai
+    model_name: local-brain
+    url: http://127.0.0.1:1235/v1
+    api_key: lm-studio
+    max_tokens: 500
+    extra_body:
+      reasoning_effort: none
+
+TTS:
+  QwenLocalTTS:
+    type: qwen_local
+    api_url: http://127.0.0.1:8765/tts
+    tts_timeout: 30
+    output_dir: tmp/
